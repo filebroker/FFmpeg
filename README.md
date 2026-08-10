@@ -1,3 +1,10 @@
+## filebroker FFmpeg fork
+
+This fork adds mehd fragment_duration to HLS fMP4 output. Previously, the MP4 fragment init contained no duration,
+which may cause clients (e.g. Chromium) to treat the stream as live instead of a VOD stream. On Chromium-based browsers,
+this enables low-delay mode with a much shallower decoded-frame buffer, making high-bitrate playback significantly more
+susceptible to stalls caused by demuxer underflow.
+
 # FFmpeg README
 
 FFmpeg is a collection of libraries and tools to process multimedia content
