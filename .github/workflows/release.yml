@@ -1,0 +1,243 @@
+name: Build and release filebroker FFmpeg
+
+on:
+  push:
+    branches:
+      - release/9.0
+    tags:
+      - "filebroker-*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Linux x86_64
+    runs-on: ubuntu-24.04
+
+    outputs:
+      bundle_name: ${{ steps.metadata.outputs.bundle_name }}
+      version: ${{ steps.metadata.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            nasm \
+            zstd \
+            libssl-dev \
+            libx264-dev \
+            libx265-dev \
+            libsvtav1-dev \
+            libaom-dev \
+            libdav1d-dev \
+            libvpx-dev \
+            libwebp-dev \
+            libjxl-dev \
+            libopenjp2-7-dev \
+            libopus-dev \
+            libvorbis-dev \
+            libmp3lame-dev \
+            libtheora-dev \
+            libspeex-dev \
+            libgsm1-dev \
+            libtwolame-dev \
+            libass-dev \
+            libfreetype-dev \
+            libfontconfig-dev \
+            libfribidi-dev \
+            libharfbuzz-dev \
+            libxml2-dev \
+            libzimg-dev \
+            libsoxr-dev \
+            liblcms2-dev
+
+      - name: Configure
+        run: |
+          ./configure \
+            --enable-gpl \
+            --enable-version3 \
+            --enable-openssl \
+            --enable-libx264 \
+            --enable-libx265 \
+            --enable-libsvtav1 \
+            --enable-libaom \
+            --enable-libdav1d \
+            --enable-libvpx \
+            --enable-libwebp \
+            --enable-libjxl \
+            --enable-libopenjpeg \
+            --enable-libopus \
+            --enable-libvorbis \
+            --enable-libmp3lame \
+            --enable-libtheora \
+            --enable-libspeex \
+            --enable-libgsm \
+            --enable-libtwolame \
+            --enable-libass \
+            --enable-libfreetype \
+            --enable-libfontconfig \
+            --enable-libfribidi \
+            --enable-libharfbuzz \
+            --enable-libxml2 \
+            --enable-libzimg \
+            --enable-libsoxr \
+            --enable-lcms2 \
+            --disable-ffplay \
+            --disable-doc
+
+      - name: Build
+        run: |
+          make -j"$(nproc)" ffmpeg ffprobe
+
+      - name: Show build configuration
+        run: |
+          ./ffmpeg -version
+          ./ffprobe -version
+
+      - name: Test HLS fMP4 mehd output
+        run: |
+          mkdir -p /tmp/ffmpeg-test
+
+          ./ffmpeg \
+            -f lavfi \
+            -i "testsrc=size=128x72:rate=30" \
+            -t 2 \
+            -c:v libx264 \
+            -pix_fmt yuv420p \
+            /tmp/ffmpeg-test/input.mp4
+
+          ./ffmpeg \
+            -i /tmp/ffmpeg-test/input.mp4 \
+            -c:v libx264 \
+            -f hls \
+            -hls_time 1 \
+            -hls_playlist_type vod \
+            -hls_flags single_file \
+            -hls_segment_type fmp4 \
+            -hls_segment_filename /tmp/ffmpeg-test/stream.m4s \
+            /tmp/ffmpeg-test/stream.m3u8
+
+          grep -a -q "mehd" /tmp/ffmpeg-test/stream.m4s
+
+      - name: Determine bundle name
+        id: metadata
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="ci-${GITHUB_SHA::12}"
+          fi
+
+          bundle_name="ffmpeg-${version}-linux-x86_64.tar.zst"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "bundle_name=$bundle_name" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble bundle
+        run: |
+          mkdir -p dist/ffmpeg/bin
+
+          install -m 755 ffmpeg dist/ffmpeg/bin/ffmpeg
+          install -m 755 ffprobe dist/ffmpeg/bin/ffprobe
+
+          tar \
+            --zstd \
+            -cf "$PWD/dist/${{ steps.metadata.outputs.bundle_name }}" \
+            -C dist \
+            ffmpeg
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: dist/${{ steps.metadata.outputs.bundle_name }}
+          archive: false
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/filebroker-')
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.bundle_name }}
+          path: dist
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/${{ needs.build.outputs.bundle_name }}" \
+            --verify-tag \
+            --generate-notes
+
+  docker:
+    name: Publish Docker image
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/filebroker-')
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.bundle_name }}
+          path: dist
+
+      - name: Extract bundle
+        run: |
+          mkdir -p docker-dist
+
+          tar \
+            --zstd \
+            -xf "dist/${{ needs.build.outputs.bundle_name }}" \
+            -C docker-dist
+
+      - name: Determine image name
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.release
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.ref_name }}
+            ${{ steps.image.outputs.name }}:latest
