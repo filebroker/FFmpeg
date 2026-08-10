@@ -55,4 +55,6 @@
 /libavcodec/vulkan/*.c
 /libavfilter/vulkan/*.c
 /.*/
+!/.github/
+!/.github/**
 !/.forgejo/
