@@ -35,7 +35,7 @@ jobs:
             libssl-dev \
             libx264-dev \
             libx265-dev \
-            libsvtav1-dev \
+            libsvtav1enc-dev \
             libaom-dev \
             libdav1d-dev \
             libvpx-dev \
