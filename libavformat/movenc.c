@@ -4486,12 +4486,34 @@ static int mov_write_trex_tag(AVIOContext *pb, MOVTrack *track)
     return 0;
 }
 
+static int mov_write_mehd_tag(AVIOContext *pb, int64_t duration)
+{
+    int64_t pos = avio_tell(pb);
+    int version = duration > UINT32_MAX;
+
+    avio_wb32(pb, 0);
+    ffio_wfourcc(pb, "mehd");
+    avio_w8(pb, version);
+    avio_wb24(pb, 0);
+
+    if (version)
+        avio_wb64(pb, duration);
+    else
+        avio_wb32(pb, duration);
+
+    return update_size(pb, pos);
+}
+
 static int mov_write_mvex_tag(AVIOContext *pb, MOVMuxContext *mov)
 {
     int64_t pos = avio_tell(pb);
     int i;
     avio_wb32(pb, 0x0); /* size */
     ffio_wfourcc(pb, "mvex");
+
+    if (mov->movie_fragment_duration > 0)
+        mov_write_mehd_tag(pb, mov->movie_fragment_duration);
+
     for (i = 0; i < mov->nb_tracks; i++)
         mov_write_trex_tag(pb, &mov->tracks[i]);
     return update_size(pb, pos);
@@ -8444,6 +8466,23 @@ static int mov_init(AVFormatContext *s)
 
     if (!mov->movie_timescale)
         mov->movie_timescale = FFMAX(movie_timescale.den, MOV_TIMESCALE);
+
+    mov->movie_fragment_duration = 0;
+
+    for (i = 0; i < s->nb_streams; i++) {
+        AVStream *st = s->streams[i];
+
+        if (st->duration > 0) {
+            int64_t duration = av_rescale_q_rnd(
+                st->duration,
+                st->time_base,
+                (AVRational) { 1, mov->movie_timescale },
+                AV_ROUND_UP
+            );
+
+            mov->movie_fragment_duration = FFMAX(mov->movie_fragment_duration, duration);
+        }
+    }
 
     for (i = 0; i < s->nb_streams; i++) {
         AVStream *st= s->streams[i];
