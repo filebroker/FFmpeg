@@ -1,0 +1,39 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl-dev \
+        libx264-dev \
+        libx265-dev \
+        libsvtav1-dev \
+        libaom-dev \
+        libdav1d-dev \
+        libvpx-dev \
+        libwebp-dev \
+        libjxl-dev \
+        libopenjp2-7-dev \
+        libopus-dev \
+        libvorbis-dev \
+        libmp3lame-dev \
+        libtheora-dev \
+        libspeex-dev \
+        libgsm1-dev \
+        libtwolame-dev \
+        libass-dev \
+        libfreetype-dev \
+        libfontconfig-dev \
+        libfribidi-dev \
+        libharfbuzz-dev \
+        libxml2-dev \
+        libzimg-dev \
+        libsoxr-dev \
+        liblcms2-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY docker-dist/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY docker-dist/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe
+
+ENTRYPOINT ["ffmpeg"]
