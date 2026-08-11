@@ -2,14 +2,14 @@
 
 set -euo pipefail
 
-VERSION="@VERSION@"
+FILEBROKER_VERSION="@VERSION@"
 REPOSITORY="filebroker/FFmpeg"
 
 INSTALL_ROOT="/opt/filebroker-ffmpeg"
-INSTALL_DIR="${INSTALL_ROOT}/${VERSION}"
+INSTALL_DIR="${INSTALL_ROOT}/${FILEBROKER_VERSION}"
 CURRENT_LINK="${INSTALL_ROOT}/current"
 
-if [[ "${VERSION}" == @* ]]; then
+if [[ "${FILEBROKER_VERSION}" == @* ]]; then
     echo "This installer template has not been configured for a release." >&2
     exit 1
 fi
@@ -272,10 +272,10 @@ cleanup() {
 
 trap cleanup EXIT
 
-SOURCE_URL="https://github.com/${REPOSITORY}/archive/refs/tags/${VERSION}.tar.gz"
+SOURCE_URL="https://github.com/${REPOSITORY}/archive/refs/tags/${FILEBROKER_VERSION}.tar.gz"
 
 echo
-echo "Downloading filebroker FFmpeg ${VERSION}..."
+echo "Downloading filebroker FFmpeg ${FILEBROKER_VERSION}..."
 echo "${SOURCE_URL}"
 
 curl -fsSL "${SOURCE_URL}" \
@@ -358,7 +358,7 @@ fi
 echo "HLS fMP4 mehd verification succeeded."
 
 echo
-echo "Installing FFmpeg ${VERSION}..."
+echo "Installing filebroker FFmpeg ${FILEBROKER_VERSION}:"
 
 sudo mkdir -p "${INSTALL_ROOT}"
 
@@ -393,7 +393,7 @@ sudo ln \
     /usr/local/bin/ffprobe
 
 echo
-echo "Installed filebroker FFmpeg ${VERSION}:"
+echo "Installed filebroker FFmpeg ${FILEBROKER_VERSION}:"
 "${CURRENT_LINK}/bin/ffmpeg" -version | head -n 1
 "${CURRENT_LINK}/bin/ffprobe" -version | head -n 1
 
