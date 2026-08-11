@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   build:
     name: Build Linux x86_64
@@ -17,7 +21,6 @@ jobs:
 
     outputs:
       bundle_name: ${{ steps.metadata.outputs.bundle_name }}
-      version: ${{ steps.metadata.outputs.version }}
 
     steps:
       - name: Checkout
@@ -127,6 +130,16 @@ jobs:
 
           grep -a -q "mehd" /tmp/ffmpeg-test/stream.m4s
 
+      - name: Validate installer template
+        run: |
+          sed \
+            -e "s|@VERSION@|ci-test|g" \
+            -e "s|@REPOSITORY@|${GITHUB_REPOSITORY}|g" \
+            scripts/install.sh.in \
+            > /tmp/install.sh
+
+          bash -n /tmp/install.sh
+
       - name: Determine bundle name
         id: metadata
         shell: bash
@@ -139,27 +152,27 @@ jobs:
 
           bundle_name="ffmpeg-${version}-linux-x86_64.tar.zst"
 
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "bundle_name=$bundle_name" >> "$GITHUB_OUTPUT"
 
       - name: Assemble bundle
         run: |
-          mkdir -p dist/ffmpeg/bin
+          mkdir -p dist/bundle/ffmpeg/bin
 
-          install -m 755 ffmpeg dist/ffmpeg/bin/ffmpeg
-          install -m 755 ffprobe dist/ffmpeg/bin/ffprobe
+          install -m 755 ffmpeg dist/bundle/ffmpeg/bin/ffmpeg
+          install -m 755 ffprobe dist/bundle/ffmpeg/bin/ffprobe
 
           tar \
             --zstd \
-            -cf "$PWD/dist/${{ steps.metadata.outputs.bundle_name }}" \
-            -C dist \
+            -cf "dist/${{ steps.metadata.outputs.bundle_name }}" \
+            -C dist/bundle \
             ffmpeg
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
+          name: ffmpeg-bundle
           path: dist/${{ steps.metadata.outputs.bundle_name }}
-          archive: false
+          if-no-files-found: error
 
   release:
     name: Publish GitHub Release
@@ -171,11 +184,33 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Download build artifact
         uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.build.outputs.bundle_name }}
+          name: ffmpeg-bundle
           path: dist
+
+      - name: Generate install script
+        run: |
+          sed \
+            -e "s|@VERSION@|${GITHUB_REF_NAME}|g" \
+            -e "s|@REPOSITORY@|${GITHUB_REPOSITORY}|g" \
+            scripts/install.sh.in \
+            > dist/install.sh
+
+          chmod +x dist/install.sh
+          bash -n dist/install.sh
+
+      - name: Generate checksums
+        working-directory: dist
+        run: |
+          sha256sum \
+            "${{ needs.build.outputs.bundle_name }}" \
+            install.sh \
+            > SHA256SUMS
 
       - name: Publish GitHub Release
         env:
@@ -184,6 +219,8 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             "dist/${{ needs.build.outputs.bundle_name }}" \
+            "dist/install.sh" \
+            "dist/SHA256SUMS" \
             --verify-tag \
             --generate-notes
 
@@ -204,7 +241,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v8
         with:
-          name: ${{ needs.build.outputs.bundle_name }}
+          name: ffmpeg-bundle
           path: dist
 
       - name: Extract bundle

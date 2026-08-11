@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+VERSION="@VERSION@"
+REPOSITORY="filebroker/FFmpeg"
+
+INSTALL_ROOT="/opt/filebroker-ffmpeg"
+INSTALL_DIR="${INSTALL_ROOT}/${VERSION}"
+CURRENT_LINK="${INSTALL_ROOT}/current"
+
+if [[ "${VERSION}" == @* ]]; then
+    echo "This installer template has not been configured for a release." >&2
+    exit 1
+fi
+
+if [[ "${EUID}" -eq 0 ]]; then
+    echo "Do not run this installer as root." >&2
+    echo "Run it as your normal user; sudo will be used when required." >&2
+    exit 1
+fi
+
+if ! command -v sudo >/dev/null 2>&1; then
+    echo "sudo is required." >&2
+    exit 1
+fi
+
+OS="$(uname -s)"
+
+if [[ "${OS}" == "Linux" ]]; then
+    if [[ ! -r /etc/os-release ]]; then
+        echo "Unable to determine Linux distribution: /etc/os-release does not exist." >&2
+        exit 1
+    fi
+
+    # shellcheck disable=SC1091
+    source /etc/os-release
+elif [[ "${OS}" != "Darwin" ]]; then
+    echo "Unsupported operating system: ${OS}" >&2
+    exit 1
+fi
+
+cpu_count() {
+    if command -v nproc >/dev/null 2>&1; then
+        nproc
+    else
+        sysctl -n hw.logicalcpu
+    fi
+}
+
+install_ubuntu_dependencies() {
+    echo "Installing Ubuntu build dependencies..."
+
+    sudo apt-get update
+
+    sudo apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        nasm \
+        curl \
+        ca-certificates \
+        tar \
+        gzip \
+        libssl-dev \
+        libx264-dev \
+        libx265-dev \
+        libsvtav1enc-dev \
+        libaom-dev \
+        libdav1d-dev \
+        libvpx-dev \
+        libwebp-dev \
+        libjxl-dev \
+        libopenjp2-7-dev \
+        libopus-dev \
+        libvorbis-dev \
+        libmp3lame-dev \
+        libtheora-dev \
+        libspeex-dev \
+        libgsm1-dev \
+        libtwolame-dev \
+        libass-dev \
+        libfreetype-dev \
+        libfontconfig-dev \
+        libfribidi-dev \
+        libharfbuzz-dev \
+        libxml2-dev \
+        libzimg-dev \
+        libsoxr-dev \
+        liblcms2-dev
+}
+
+install_fedora_dependencies() {
+    echo "Installing Fedora build dependencies..."
+
+    if ! rpm -q rpmfusion-free-release >/dev/null 2>&1; then
+        echo "Enabling RPM Fusion Free..."
+
+        sudo dnf install -y \
+            "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm"
+    fi
+
+    sudo dnf install -y \
+        gcc \
+        gcc-c++ \
+        make \
+        pkgconf-pkg-config \
+        nasm \
+        curl \
+        ca-certificates \
+        tar \
+        gzip \
+        openssl-devel \
+        x264-devel \
+        x265-devel \
+        svt-av1-devel \
+        libaom-devel \
+        libdav1d-devel \
+        libvpx-devel \
+        libwebp-devel \
+        libjxl-devel \
+        openjpeg-devel \
+        opus-devel \
+        libvorbis-devel \
+        lame-devel \
+        libtheora-devel \
+        speex-devel \
+        gsm-devel \
+        twolame-devel \
+        libass-devel \
+        freetype-devel \
+        fontconfig-devel \
+        fribidi-devel \
+        harfbuzz-devel \
+        libxml2-devel \
+        zimg-devel \
+        soxr-devel \
+        lcms2-devel
+}
+
+install_arch_dependencies() {
+    echo "Installing Arch Linux build dependencies..."
+
+    sudo pacman -Syu --needed --noconfirm \
+        base-devel \
+        pkgconf \
+        nasm \
+        curl \
+        ca-certificates \
+        openssl \
+        x264 \
+        x265 \
+        svt-av1 \
+        aom \
+        dav1d \
+        libvpx \
+        libwebp \
+        libjxl \
+        openjpeg2 \
+        opus \
+        libvorbis \
+        lame \
+        libtheora \
+        speex \
+        gsm \
+        twolame \
+        libass \
+        freetype2 \
+        fontconfig \
+        fribidi \
+        harfbuzz \
+        libxml2 \
+        zimg \
+        libsoxr \
+        lcms2
+}
+
+install_macos_dependencies() {
+    if ! xcode-select -p >/dev/null 2>&1; then
+        echo "Xcode Command Line Tools are required." >&2
+        echo "Install them with:" >&2
+        echo "  xcode-select --install" >&2
+        exit 1
+    fi
+
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "Homebrew is required on macOS." >&2
+        echo "Install Homebrew first, then rerun this installer." >&2
+        exit 1
+    fi
+
+    echo "Installing macOS build dependencies..."
+
+    brew install \
+        pkgconf \
+        nasm \
+        openssl@3 \
+        x264 \
+        x265 \
+        svt-av1 \
+        aom \
+        dav1d \
+        libvpx \
+        webp \
+        jpeg-xl \
+        openjpeg \
+        opus \
+        libvorbis \
+        lame \
+        theora \
+        speex \
+        libgsm \
+        two-lame \
+        libass \
+        freetype \
+        fontconfig \
+        fribidi \
+        harfbuzz \
+        libxml2 \
+        zimg \
+        libsoxr \
+        little-cms2
+
+    local openssl_prefix
+    local libxml2_prefix
+
+    openssl_prefix="$(brew --prefix openssl@3)"
+    libxml2_prefix="$(brew --prefix libxml2)"
+
+    export PKG_CONFIG_PATH="${openssl_prefix}/lib/pkgconfig:${libxml2_prefix}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+    export CPPFLAGS="-I${openssl_prefix}/include -I${libxml2_prefix}/include/libxml2${CPPFLAGS:+ ${CPPFLAGS}}"
+    export LDFLAGS="-L${openssl_prefix}/lib -L${libxml2_prefix}/lib${LDFLAGS:+ ${LDFLAGS}}"
+}
+
+if [[ "${OS}" == "Darwin" ]]; then
+    install_macos_dependencies
+else
+    case "${ID}" in
+        ubuntu)
+            install_ubuntu_dependencies
+            ;;
+
+        fedora)
+            install_fedora_dependencies
+            ;;
+
+        arch)
+            install_arch_dependencies
+            ;;
+
+        *)
+            if [[ " ${ID_LIKE:-} " == *" arch "* ]]; then
+                install_arch_dependencies
+            else
+                echo "Unsupported Linux distribution: ${ID}" >&2
+                echo "Currently supported:" >&2
+                echo "  Ubuntu" >&2
+                echo "  Fedora" >&2
+                echo "  Arch Linux and Arch-based distributions" >&2
+                echo "  macOS" >&2
+                exit 1
+            fi
+            ;;
+    esac
+fi
+
+SOURCE_DIR="$(mktemp -d)"
+TEST_DIR="$(mktemp -d)"
+
+cleanup() {
+    rm -rf "${SOURCE_DIR}" "${TEST_DIR}"
+}
+
+trap cleanup EXIT
+
+SOURCE_URL="https://github.com/${REPOSITORY}/archive/refs/tags/${VERSION}.tar.gz"
+
+echo
+echo "Downloading filebroker FFmpeg ${VERSION}..."
+echo "${SOURCE_URL}"
+
+curl -fsSL "${SOURCE_URL}" \
+    | tar \
+        -xz \
+        --strip-components=1 \
+        -C "${SOURCE_DIR}"
+
+cd "${SOURCE_DIR}"
+
+echo
+echo "Configuring FFmpeg..."
+
+./configure \
+    --enable-gpl \
+    --enable-version3 \
+    --enable-openssl \
+    --enable-libx264 \
+    --enable-libx265 \
+    --enable-libsvtav1 \
+    --enable-libaom \
+    --enable-libdav1d \
+    --enable-libvpx \
+    --enable-libwebp \
+    --enable-libjxl \
+    --enable-libopenjpeg \
+    --enable-libopus \
+    --enable-libvorbis \
+    --enable-libmp3lame \
+    --enable-libtheora \
+    --enable-libspeex \
+    --enable-libgsm \
+    --enable-libtwolame \
+    --enable-libass \
+    --enable-libfreetype \
+    --enable-libfontconfig \
+    --enable-libfribidi \
+    --enable-libharfbuzz \
+    --enable-libxml2 \
+    --enable-libzimg \
+    --enable-libsoxr \
+    --enable-lcms2 \
+    --disable-ffplay \
+    --disable-doc
+
+echo
+echo "Building FFmpeg..."
+
+make -j"$(cpu_count)" ffmpeg ffprobe
+
+echo
+echo "Testing HLS fMP4 mehd output..."
+
+./ffmpeg \
+    -v error \
+    -f lavfi \
+    -i "testsrc=size=128x72:rate=30" \
+    -t 2 \
+    -c:v libx264 \
+    -pix_fmt yuv420p \
+    "${TEST_DIR}/input.mp4"
+
+./ffmpeg \
+    -v error \
+    -i "${TEST_DIR}/input.mp4" \
+    -c:v libx264 \
+    -f hls \
+    -hls_time 1 \
+    -hls_playlist_type vod \
+    -hls_flags single_file \
+    -hls_segment_type fmp4 \
+    -hls_segment_filename "${TEST_DIR}/stream.m4s" \
+    "${TEST_DIR}/stream.m3u8"
+
+if ! grep -a -q "mehd" "${TEST_DIR}/stream.m4s"; then
+    echo "HLS fMP4 mehd verification failed." >&2
+    exit 1
+fi
+
+echo "HLS fMP4 mehd verification succeeded."
+
+echo
+echo "Installing FFmpeg ${VERSION}..."
+
+sudo mkdir -p "${INSTALL_ROOT}"
+
+sudo rm -rf "${INSTALL_DIR}"
+sudo mkdir -p "${INSTALL_DIR}/bin"
+
+sudo install \
+    -m 0755 \
+    ffmpeg \
+    "${INSTALL_DIR}/bin/ffmpeg"
+
+sudo install \
+    -m 0755 \
+    ffprobe \
+    "${INSTALL_DIR}/bin/ffprobe"
+
+sudo ln \
+    -sfn \
+    "${INSTALL_DIR}" \
+    "${CURRENT_LINK}"
+
+sudo mkdir -p /usr/local/bin
+
+sudo ln \
+    -sfn \
+    "${CURRENT_LINK}/bin/ffmpeg" \
+    /usr/local/bin/ffmpeg
+
+sudo ln \
+    -sfn \
+    "${CURRENT_LINK}/bin/ffprobe" \
+    /usr/local/bin/ffprobe
+
+echo
+echo "Installed filebroker FFmpeg ${VERSION}:"
+"${CURRENT_LINK}/bin/ffmpeg" -version | head -n 1
+"${CURRENT_LINK}/bin/ffprobe" -version | head -n 1
+
+echo
+echo "ffmpeg:  /usr/local/bin/ffmpeg"
+echo "ffprobe: /usr/local/bin/ffprobe"
