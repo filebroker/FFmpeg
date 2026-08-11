@@ -5,6 +5,13 @@ which may cause clients (e.g. Chromium) to treat the stream as live instead of a
 this enables low-delay mode with a much shallower decoded-frame buffer, making high-bitrate playback significantly more
 susceptible to stalls caused by demuxer underflow.
 
+To install dependencies and build from source, you can run this command to execute the latest release build script
+```bash
+curl -fsSL \
+  https://github.com/filebroker/FFmpeg/releases/latest/download/install.sh \
+  | bash
+```
+
 # FFmpeg README
 
 FFmpeg is a collection of libraries and tools to process multimedia content
