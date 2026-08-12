@@ -190,7 +190,7 @@ install_macos_dependencies() {
 
     echo "Installing macOS build dependencies..."
 
-    brew install \
+    HOMEBREW_NO_AUTO_UPDATE=1 brew install \
         pkgconf \
         nasm \
         openssl@3 \
@@ -220,15 +220,31 @@ install_macos_dependencies() {
         libsoxr \
         little-cms2
 
+    local brew_prefix
     local openssl_prefix
     local libxml2_prefix
+    local libgsm_prefix
 
+    brew_prefix="$(brew --prefix)"
     openssl_prefix="$(brew --prefix openssl@3)"
     libxml2_prefix="$(brew --prefix libxml2)"
+    libgsm_prefix="$(brew --prefix libgsm)"
 
     export PKG_CONFIG_PATH="${openssl_prefix}/lib/pkgconfig:${libxml2_prefix}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
-    export CPPFLAGS="-I${openssl_prefix}/include -I${libxml2_prefix}/include/libxml2${CPPFLAGS:+ ${CPPFLAGS}}"
-    export LDFLAGS="-L${openssl_prefix}/lib -L${libxml2_prefix}/lib${LDFLAGS:+ ${LDFLAGS}}"
+
+    export CPPFLAGS="\
+      -I${brew_prefix}/include \
+      -I${openssl_prefix}/include \
+      -I${libxml2_prefix}/include/libxml2 \
+      -I${libgsm_prefix}/include\
+      ${CPPFLAGS:+ ${CPPFLAGS}}"
+
+    export LDFLAGS="\
+      -L${brew_prefix}/lib \
+      -L${openssl_prefix}/lib \
+      -L${libxml2_prefix}/lib \
+      -L${libgsm_prefix}/lib\
+      ${LDFLAGS:+ ${LDFLAGS}}"
 }
 
 if [[ "${OS}" == "Darwin" ]]; then
