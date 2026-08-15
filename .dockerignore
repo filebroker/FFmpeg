@@ -1,5 +1,3 @@
-*
-
-!Dockerfile.release
-!docker-dist/
-!docker-dist/**
+.git
+dist
+docker-dist
