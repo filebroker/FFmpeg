@@ -48,11 +48,10 @@ cpu_count() {
     fi
 }
 
-install_ubuntu_dependencies() {
-    echo "Installing Ubuntu build dependencies..."
+install_apt_dependencies() {
+    echo "Installing Debian/Ubuntu build dependencies..."
 
     sudo apt-get update
-
     sudo apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
@@ -119,6 +118,112 @@ install_fedora_dependencies() {
         libwebp-devel \
         libjxl-devel \
         openjpeg-devel \
+        opus-devel \
+        libvorbis-devel \
+        lame-devel \
+        libtheora-devel \
+        speex-devel \
+        gsm-devel \
+        twolame-devel \
+        libass-devel \
+        freetype-devel \
+        fontconfig-devel \
+        fribidi-devel \
+        harfbuzz-devel \
+        libxml2-devel \
+        zimg-devel \
+        soxr-devel \
+        lcms2-devel
+}
+
+enable_el_repositories() {
+    local el_major="${VERSION_ID%%.*}"
+
+    case "${el_major}" in
+        9|10)
+            ;;
+        *)
+            echo "Unsupported Enterprise Linux version: ${VERSION_ID}" >&2
+            echo "Currently supported Enterprise Linux versions: 9 and 10" >&2
+            exit 1
+            ;;
+    esac
+
+    case "${ID}" in
+        rhel)
+            if ! command -v subscription-manager >/dev/null 2>&1; then
+                echo "subscription-manager is required on RHEL." >&2
+                exit 1
+            fi
+
+            echo "Enabling CodeReady Linux Builder..."
+
+            sudo subscription-manager repos \
+                --enable "codeready-builder-for-rhel-${el_major}-$(arch)-rpms"
+            ;;
+
+        centos|rocky|almalinux)
+            echo "Enabling CRB..."
+
+            sudo dnf install -y dnf-plugins-core
+            sudo dnf config-manager --set-enabled crb
+            ;;
+
+        *)
+            echo "Unsupported Enterprise Linux distribution: ${ID}" >&2
+            exit 1
+            ;;
+    esac
+
+    if ! rpm -q epel-release >/dev/null 2>&1; then
+        echo "Enabling EPEL..."
+
+        sudo dnf install -y \
+            "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${el_major}.noarch.rpm"
+    fi
+
+    # CentOS Stream 9 additionally uses EPEL Next.
+    if [[ "${ID}" == "centos" && "${el_major}" == "9" ]] &&
+       ! rpm -q epel-next-release >/dev/null 2>&1; then
+        echo "Enabling EPEL Next..."
+
+        sudo dnf install -y \
+            "https://dl.fedoraproject.org/pub/epel/epel-next-release-latest-9.noarch.rpm"
+    fi
+
+    if ! rpm -q rpmfusion-free-release >/dev/null 2>&1; then
+        echo "Enabling RPM Fusion Free for Enterprise Linux..."
+
+        sudo dnf install -y \
+            "https://mirrors.rpmfusion.org/free/el/rpmfusion-free-release-${el_major}.noarch.rpm"
+    fi
+}
+
+install_el_dependencies() {
+    echo "Installing Enterprise Linux build dependencies..."
+
+    enable_el_repositories
+
+    sudo dnf install -y \
+        gcc \
+        gcc-c++ \
+        make \
+        pkgconf-pkg-config \
+        nasm \
+        curl \
+        ca-certificates \
+        tar \
+        gzip \
+        openssl-devel \
+        x264-devel \
+        x265-devel \
+        svt-av1-devel \
+        libaom-devel \
+        libdav1d-devel \
+        libvpx-devel \
+        libwebp-devel \
+        libjxl-devel \
+        openjpeg2-devel \
         opus-devel \
         libvorbis-devel \
         lame-devel \
@@ -251,12 +356,16 @@ if [[ "${OS}" == "Darwin" ]]; then
     install_macos_dependencies
 else
     case "${ID}" in
-        ubuntu)
-            install_ubuntu_dependencies
+        debian|ubuntu)
+            install_apt_dependencies
             ;;
 
         fedora)
             install_fedora_dependencies
+            ;;
+
+        rhel|centos|rocky|almalinux)
+            install_el_dependencies
             ;;
 
         arch)
@@ -264,13 +373,21 @@ else
             ;;
 
         *)
-            if [[ " ${ID_LIKE:-} " == *" arch "* ]]; then
+            if [[ " ${ID_LIKE:-} " == *" debian "* ||
+                  " ${ID_LIKE:-} " == *" ubuntu "* ]]; then
+                install_apt_dependencies
+            elif [[ " ${ID_LIKE:-} " == *" arch "* ]]; then
                 install_arch_dependencies
             else
                 echo "Unsupported Linux distribution: ${ID}" >&2
                 echo "Currently supported:" >&2
-                echo "  Ubuntu" >&2
+                echo "  Debian and Debian-based distributions" >&2
+                echo "  Ubuntu and Ubuntu-based distributions" >&2
                 echo "  Fedora" >&2
+                echo "  RHEL 9/10" >&2
+                echo "  CentOS Stream 9/10" >&2
+                echo "  Rocky Linux 9/10" >&2
+                echo "  AlmaLinux 9/10" >&2
                 echo "  Arch Linux and Arch-based distributions" >&2
                 echo "  macOS" >&2
                 exit 1
@@ -410,6 +527,7 @@ sudo ln \
 
 echo
 echo "Installed filebroker FFmpeg ${FILEBROKER_VERSION}:"
+
 "${CURRENT_LINK}/bin/ffmpeg" -version | head -n 1
 "${CURRENT_LINK}/bin/ffprobe" -version | head -n 1
 
