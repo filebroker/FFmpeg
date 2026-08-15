@@ -10,31 +10,28 @@ on:
 permissions:
   contents: read
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 jobs:
   build:
-    name: Build Linux x86_64
+    name: Build and test Linux x86_64
     runs-on: ubuntu-24.04
 
-    outputs:
-      bundle_name: ${{ steps.metadata.outputs.bundle_name }}
+    container:
+      image: debian:trixie
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git \
+            ca-certificates \
             build-essential \
             pkg-config \
             nasm \
-            zstd \
             libssl-dev \
             libx264-dev \
             libx265-dev \
@@ -61,6 +58,9 @@ jobs:
             libzimg-dev \
             libsoxr-dev \
             liblcms2-dev
+
+      - name: Checkout
+        uses: actions/checkout@v6
 
       - name: Configure
         run: |
@@ -110,6 +110,7 @@ jobs:
           mkdir -p /tmp/ffmpeg-test
 
           ./ffmpeg \
+            -v error \
             -f lavfi \
             -i "testsrc=size=128x72:rate=30" \
             -t 2 \
@@ -118,6 +119,7 @@ jobs:
             /tmp/ffmpeg-test/input.mp4
 
           ./ffmpeg \
+            -v error \
             -i /tmp/ffmpeg-test/input.mp4 \
             -c:v libx264 \
             -f hls \
@@ -134,45 +136,11 @@ jobs:
         run: |
           sed \
             -e "s|@VERSION@|ci-test|g" \
-            -e "s|@REPOSITORY@|${GITHUB_REPOSITORY}|g" \
             scripts/install.sh.in \
             > /tmp/install.sh
 
           bash -n /tmp/install.sh
 
-      - name: Determine bundle name
-        id: metadata
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            version="$GITHUB_REF_NAME"
-          else
-            version="ci-${GITHUB_SHA::12}"
-          fi
-
-          bundle_name="ffmpeg-${version}-linux-x86_64.tar.zst"
-
-          echo "bundle_name=$bundle_name" >> "$GITHUB_OUTPUT"
-
-      - name: Assemble bundle
-        run: |
-          mkdir -p dist/bundle/ffmpeg/bin
-
-          install -m 755 ffmpeg dist/bundle/ffmpeg/bin/ffmpeg
-          install -m 755 ffprobe dist/bundle/ffmpeg/bin/ffprobe
-
-          tar \
-            --zstd \
-            -cf "dist/${{ steps.metadata.outputs.bundle_name }}" \
-            -C dist/bundle \
-            ffmpeg
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ffmpeg-bundle
-          path: dist/${{ steps.metadata.outputs.bundle_name }}
-          if-no-files-found: error
 
   release:
     name: Publish GitHub Release
@@ -187,30 +155,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Download build artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: ffmpeg-bundle
-          path: dist
-
       - name: Generate install script
         run: |
+          mkdir -p dist
+
           sed \
             -e "s|@VERSION@|${GITHUB_REF_NAME}|g" \
-            -e "s|@REPOSITORY@|${GITHUB_REPOSITORY}|g" \
             scripts/install.sh.in \
             > dist/install.sh
 
           chmod +x dist/install.sh
           bash -n dist/install.sh
 
-      - name: Generate checksums
+      - name: Generate checksum
         working-directory: dist
         run: |
-          sha256sum \
-            "${{ needs.build.outputs.bundle_name }}" \
-            install.sh \
-            > SHA256SUMS
+          sha256sum install.sh > SHA256SUMS
 
       - name: Publish GitHub Release
         env:
@@ -218,11 +178,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            "dist/${{ needs.build.outputs.bundle_name }}" \
             "dist/install.sh" \
             "dist/SHA256SUMS" \
             --verify-tag \
             --generate-notes
+
 
   docker:
     name: Publish Docker image
@@ -237,21 +197,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: ffmpeg-bundle
-          path: dist
-
-      - name: Extract bundle
-        run: |
-          mkdir -p docker-dist
-
-          tar \
-            --zstd \
-            -xf "dist/${{ needs.build.outputs.bundle_name }}" \
-            -C docker-dist
 
       - name: Determine image name
         id: image
@@ -278,3 +223,5 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:${{ github.ref_name }}
             ${{ steps.image.outputs.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
